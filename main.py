@@ -1,15 +1,13 @@
 import pygame
-from game.game_engine import GameEngine
 
-# Initialize pygame/Start application
+# Must run BEFORE pygame.init() so the mixer uses the format our sounds are generated in.
+pygame.mixer.pre_init(44100, -16, 1, 512)
 pygame.init()
 
-# Screen dimensions
+from game.game_engine import GameEngine  # noqa: E402
+
 WIDTH, HEIGHT = 700, 500
-
-# Colors
 DARK_GRAY = (35, 35, 40)
-
 FPS = 60
 
 

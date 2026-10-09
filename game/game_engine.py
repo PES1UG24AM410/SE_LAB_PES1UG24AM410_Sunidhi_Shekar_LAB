@@ -3,6 +3,7 @@ import random
 
 import pygame
 
+from .sound import SoundManager
 from .target import Target
 
 WHITE = (255, 255, 255)
@@ -39,6 +40,7 @@ class GameEngine:
 
         self.font = pygame.font.SysFont("Arial", 26)
         self.big_font = pygame.font.SysFont("Arial", 56, bold=True)
+        self.sounds = SoundManager()
         self.overlay = pygame.Surface((width, height), pygame.SRCALPHA)
         self.overlay.fill((0, 0, 0, 190))
 
@@ -84,12 +86,14 @@ class GameEngine:
         if self.target.contains_point(*pos):
             self.hits += 1
             self.score += 1
+            self.sounds.play("hit")
             self.target = self._spawn_target()
         else:
             self._register_miss()
 
     def _register_miss(self):
         self.misses += 1
+        self.sounds.play("miss")
 
     def handle_input(self):
         pass  # fully mouse/event driven; nothing to poll
@@ -105,6 +109,7 @@ class GameEngine:
             self.time_left_ms = 0
             self.state = GAME_OVER
             self.game_over_at = pygame.time.get_ticks()
+            self.sounds.play("end")
             return
 
         self.target.update(dt_ms)
