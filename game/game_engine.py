@@ -7,28 +7,41 @@ from .target import Target
 
 WHITE = (255, 255, 255)
 RED = (220, 60, 60)
+GRAY = (170, 170, 175)
+GOLD = (240, 200, 80)
+
+PLAYING = "playing"
+GAME_OVER = "game_over"
 
 ROUND_SECONDS = 30
-MAX_DT_MS = 50  # clamp frame time so a lag spike/window drag can't eat the round
+MAX_DT_MS = 50          # clamp frame time so a lag spike/window drag can't eat the round
+INPUT_DELAY_MS = 600    # ignore keys right after game over (stops accidental quits)
 
 
 class GameEngine:
     def __init__(self, width, height):
         self.width = width
         self.height = height
-
         self.margin = 60
         self.hud_height = 60
-        self.target = None
-        self.target = self._spawn_target()
 
+        self.font = pygame.font.SysFont("Arial", 26)
+        self.big_font = pygame.font.SysFont("Arial", 56, bold=True)
+        self.overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        self.overlay.fill((0, 0, 0, 190))
+
+        self.start_round()
+
+    # ---------- round lifecycle ----------
+    def start_round(self):
         self.time_left_ms = ROUND_SECONDS * 1000
-
         self.hits = 0
         self.misses = 0
         self.score = 0
-        self.font = pygame.font.SysFont("Arial", 26)
-        self.game_over = False
+        self.state = PLAYING
+        self.game_over_at = 0
+        self.target = None
+        self.target = self._spawn_target()
 
     def _spawn_target(self):
         prev = self.target
@@ -39,67 +52,80 @@ class GameEngine:
                 break
         return Target(x, y)
 
+    # ---------- input ----------
     def handle_event(self, event):
-        if self.game_over:
-            return
-        # Left button only: in pygame, scroll-wheel also fires MOUSEBUTTONDOWN (4/5)
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            self._handle_click(event.pos)
+        if self.state == PLAYING:
+            # Left button only: in pygame, scroll-wheel also fires MOUSEBUTTONDOWN (4/5)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                self._handle_click(event.pos)
+        elif event.type == pygame.KEYDOWN:
+            if pygame.time.get_ticks() - self.game_over_at < INPUT_DELAY_MS:
+                return
+            if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                pygame.event.post(pygame.event.Event(pygame.QUIT))
 
     def _handle_click(self, pos):
-        x, y = pos
-        # contains_point() now uses the same radius that render() draws.
-        if self.target.contains_point(x, y):
+        if self.target.contains_point(*pos):
             self.hits += 1
             self.score += 1
             self.target = self._spawn_target()
         else:
-            self.misses += 1
+            self._register_miss()
+
+    def _register_miss(self):
+        self.misses += 1
 
     def handle_input(self):
-        # Reserved for continuously-held-key input; this game is
-        # entirely mouse-driven, so there's nothing to poll here.
-        pass
+        pass  # fully mouse/event driven; nothing to poll
 
+    # ---------- simulation ----------
     def update(self, dt_ms=1000 / 60):
-        if self.game_over:
+        if self.state != PLAYING:
             return
         dt_ms = min(dt_ms, MAX_DT_MS)
 
         self.time_left_ms -= dt_ms
         if self.time_left_ms <= 0:
             self.time_left_ms = 0
-            self.game_over = True
+            self.state = GAME_OVER
+            self.game_over_at = pygame.time.get_ticks()
             return
 
         self.target.update(dt_ms)
         if self.target.expired():
-            self.misses += 1  # letting a target time out counts as a miss too
+            self._register_miss()
             self.target = self._spawn_target()
 
     def accuracy(self):
         total = self.hits + self.misses
-        if total == 0:
-            return 0.0
-        return round(100 * self.hits / total, 1)
+        return 0.0 if total == 0 else round(100 * self.hits / total, 1)
+
+    # ---------- drawing ----------
+    def _text(self, screen, text, y, font=None, color=WHITE):
+        surf = (font or self.font).render(text, True, color)
+        screen.blit(surf, surf.get_rect(center=(self.width // 2, y)))
 
     def render(self, screen):
-        r = self.target.radius  # same value the hit-test uses
-        pos = (self.target.x, self.target.y)
-        pygame.draw.circle(screen, RED, pos, r)
-        pygame.draw.circle(screen, WHITE, pos, r, 2)
+        if self.state == PLAYING:
+            r = self.target.radius  # same value the hit-test uses
+            pos = (self.target.x, self.target.y)
+            pygame.draw.circle(screen, RED, pos, r)
+            pygame.draw.circle(screen, WHITE, pos, r, 2)
 
-        score_text = self.font.render(f"Score: {self.score}", True, WHITE)
-        screen.blit(score_text, (10, 10))
+        screen.blit(self.font.render(f"Score: {self.score}", True, WHITE), (10, 10))
+        secs = math.ceil(self.time_left_ms / 1000)
+        screen.blit(self.font.render(f"Time: {secs}s", True, WHITE), (self.width - 140, 10))
+        screen.blit(self.font.render(f"Accuracy: {self.accuracy()}%", True, WHITE),
+                    (self.width // 2 - 90, 10))
 
-        seconds_left = math.ceil(self.time_left_ms / 1000)
-        timer_text = self.font.render(f"Time: {seconds_left}s", True, WHITE)
-        screen.blit(timer_text, (self.width - 140, 10))
+        if self.state == GAME_OVER:
+            self._render_game_over(screen)
 
-        acc_text = self.font.render(f"Accuracy: {self.accuracy()}%", True, WHITE)
-        screen.blit(acc_text, (self.width // 2 - 90, 10))
-
-        if self.game_over and not getattr(self, "_game_over_logged", False):
-            # NOTE: no proper game-over screen yet - see Task 2 in the README.
-            print(f"Time's up! Final score: {self.score}  Accuracy: {self.accuracy()}%")
-            self._game_over_logged = True
+    def _render_game_over(self, screen):
+        screen.blit(self.overlay, (0, 0))
+        cy = self.height // 2
+        self._text(screen, "Time's Up!", cy - 150, self.big_font, GOLD)
+        self._text(screen, f"Final Score: {self.score}", cy - 80)
+        self._text(screen, f"Accuracy: {self.accuracy()}%", cy - 45)
+        self._text(screen, f"Hits: {self.hits}   Misses: {self.misses}", cy - 10, color=GRAY)
+        self._text(screen, "Press Esc or Q to quit", cy + 60, color=GRAY)
