@@ -13,13 +13,25 @@ GOLD = (240, 200, 80)
 PLAYING = "playing"
 GAME_OVER = "game_over"
 
+# Target size / lifespan per difficulty. "Medium" matches the original game.
+DIFFICULTIES = {
+    "Easy":   dict(base_radius=55, min_radius=22, lifespan_ms=2200),
+    "Medium": dict(base_radius=40, min_radius=12, lifespan_ms=1500),
+    "Hard":   dict(base_radius=30, min_radius=8,  lifespan_ms=900),
+}
+KEY_TO_DIFFICULTY = {
+    pygame.K_1: "Easy", pygame.K_KP1: "Easy",
+    pygame.K_2: "Medium", pygame.K_KP2: "Medium",
+    pygame.K_3: "Hard", pygame.K_KP3: "Hard",
+}
+
 ROUND_SECONDS = 30
 MAX_DT_MS = 50          # clamp frame time so a lag spike/window drag can't eat the round
-INPUT_DELAY_MS = 600    # ignore keys right after game over (stops accidental quits)
+INPUT_DELAY_MS = 600    # ignore keys right after game over (stops accidental replays)
 
 
 class GameEngine:
-    def __init__(self, width, height):
+    def __init__(self, width, height, difficulty="Medium"):
         self.width = width
         self.height = height
         self.margin = 60
@@ -30,10 +42,12 @@ class GameEngine:
         self.overlay = pygame.Surface((width, height), pygame.SRCALPHA)
         self.overlay.fill((0, 0, 0, 190))
 
-        self.start_round()
+        self.start_round(difficulty)
 
     # ---------- round lifecycle ----------
-    def start_round(self):
+    def start_round(self, difficulty):
+        self.difficulty = difficulty
+        self.settings = DIFFICULTIES[difficulty]
         self.time_left_ms = ROUND_SECONDS * 1000
         self.hits = 0
         self.misses = 0
@@ -50,7 +64,7 @@ class GameEngine:
             y = random.randint(self.margin + self.hud_height, self.height - self.margin)
             if prev is None or math.hypot(x - prev.x, y - prev.y) >= 100:
                 break
-        return Target(x, y)
+        return Target(x, y, **self.settings)
 
     # ---------- input ----------
     def handle_event(self, event):
@@ -61,7 +75,9 @@ class GameEngine:
         elif event.type == pygame.KEYDOWN:
             if pygame.time.get_ticks() - self.game_over_at < INPUT_DELAY_MS:
                 return
-            if event.key in (pygame.K_ESCAPE, pygame.K_q):
+            if event.key in KEY_TO_DIFFICULTY:
+                self.start_round(KEY_TO_DIFFICULTY[event.key])
+            elif event.key in (pygame.K_ESCAPE, pygame.K_q):
                 pygame.event.post(pygame.event.Event(pygame.QUIT))
 
     def _handle_click(self, pos):
@@ -127,5 +143,8 @@ class GameEngine:
         self._text(screen, "Time's Up!", cy - 150, self.big_font, GOLD)
         self._text(screen, f"Final Score: {self.score}", cy - 80)
         self._text(screen, f"Accuracy: {self.accuracy()}%", cy - 45)
-        self._text(screen, f"Hits: {self.hits}   Misses: {self.misses}", cy - 10, color=GRAY)
-        self._text(screen, "Press Esc or Q to quit", cy + 60, color=GRAY)
+        self._text(screen, f"Hits: {self.hits}   Misses: {self.misses}   ({self.difficulty})",
+                   cy - 10, color=GRAY)
+        self._text(screen, "Play again:", cy + 50)
+        self._text(screen, "1 - Easy     2 - Medium     3 - Hard", cy + 85, color=GOLD)
+        self._text(screen, "Esc / Q - Quit", cy + 130, color=GRAY)
