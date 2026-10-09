@@ -1,11 +1,16 @@
-import pygame
+import math
 import random
-from .target import Target
 
-# Game Engine
+import pygame
+
+from .target import Target
 
 WHITE = (255, 255, 255)
 RED = (220, 60, 60)
+
+ROUND_SECONDS = 30
+MAX_DT_MS = 50  # clamp frame time so a lag spike/window drag can't eat the round
+
 
 class GameEngine:
     def __init__(self, width, height):
@@ -14,10 +19,10 @@ class GameEngine:
 
         self.margin = 60
         self.hud_height = 60
+        self.target = None
         self.target = self._spawn_target()
 
-        self.round_seconds = 30
-        self.time_left_frames = self.round_seconds * 60
+        self.time_left_ms = ROUND_SECONDS * 1000
 
         self.hits = 0
         self.misses = 0
@@ -26,18 +31,24 @@ class GameEngine:
         self.game_over = False
 
     def _spawn_target(self):
-        x = random.randint(self.margin, self.width - self.margin)
-        y = random.randint(self.margin + self.hud_height, self.height - self.margin)
+        prev = self.target
+        for _ in range(10):  # avoid respawning right on top of the old target
+            x = random.randint(self.margin, self.width - self.margin)
+            y = random.randint(self.margin + self.hud_height, self.height - self.margin)
+            if prev is None or math.hypot(x - prev.x, y - prev.y) >= 100:
+                break
         return Target(x, y)
 
     def handle_event(self, event):
         if self.game_over:
             return
-        if event.type == pygame.MOUSEBUTTONDOWN:
+        # Left button only: in pygame, scroll-wheel also fires MOUSEBUTTONDOWN (4/5)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self._handle_click(event.pos)
 
     def _handle_click(self, pos):
         x, y = pos
+        # contains_point() now uses the same radius that render() draws.
         if self.target.contains_point(x, y):
             self.hits += 1
             self.score += 1
@@ -50,16 +61,18 @@ class GameEngine:
         # entirely mouse-driven, so there's nothing to poll here.
         pass
 
-    def update(self):
+    def update(self, dt_ms=1000 / 60):
         if self.game_over:
             return
+        dt_ms = min(dt_ms, MAX_DT_MS)
 
-        self.time_left_frames -= 1
-        if self.time_left_frames <= 0:
+        self.time_left_ms -= dt_ms
+        if self.time_left_ms <= 0:
+            self.time_left_ms = 0
             self.game_over = True
             return
 
-        self.target.update()
+        self.target.update(dt_ms)
         if self.target.expired():
             self.misses += 1  # letting a target time out counts as a miss too
             self.target = self._spawn_target()
@@ -71,14 +84,15 @@ class GameEngine:
         return round(100 * self.hits / total, 1)
 
     def render(self, screen):
-        r = int(self.target.visual_radius())
-        pygame.draw.circle(screen, RED, (self.target.x, self.target.y), r)
-        pygame.draw.circle(screen, WHITE, (self.target.x, self.target.y), r, 2)
+        r = self.target.radius  # same value the hit-test uses
+        pos = (self.target.x, self.target.y)
+        pygame.draw.circle(screen, RED, pos, r)
+        pygame.draw.circle(screen, WHITE, pos, r, 2)
 
         score_text = self.font.render(f"Score: {self.score}", True, WHITE)
         screen.blit(score_text, (10, 10))
 
-        seconds_left = max(0, self.time_left_frames // 60)
+        seconds_left = math.ceil(self.time_left_ms / 1000)
         timer_text = self.font.render(f"Time: {seconds_left}s", True, WHITE)
         screen.blit(timer_text, (self.width - 140, 10))
 
