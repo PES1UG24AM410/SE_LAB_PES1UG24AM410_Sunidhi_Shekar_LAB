@@ -1,0 +1,6 @@
+﻿************* Module ecommerce_cart_system
+ecommerce_cart_system.py:90:0: C0304: Final newline missing (missing-final-newline)
+
+------------------------------------------------------------------
+Your code has been rated at 9.80/10 (previous run: 9.80/10, +0.00)
+
